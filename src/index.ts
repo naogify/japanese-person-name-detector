@@ -48,6 +48,48 @@ export interface DetectorOptions {
    * 自前の辞書を渡すときに畳み込みが不要なら null を渡す
    */
   fold?: Fold | null;
+  /**
+   * Jev（TypeSafe の判定専用モデル）で迷う行を判定し直す。省略時は使わない（同期の判定のみ）。
+   * 使うときは explainAsync / looksLikePersonNameAsync を呼ぶ（explain / looksLikePersonName は変わらない）
+   */
+  jev?: JevOptions;
+}
+
+/** Jev に渡す文脈。施設名以外の手がかり（任意）。住所・電話などの個人情報は渡さない */
+export interface JevContext {
+  /** 業種（例: 飲食店営業）。あると判定がやや安定する */
+  businessType?: string;
+  /** 都道府県名 */
+  prefecture?: string;
+}
+
+/** Jev の設定。API キーは環境変数などから呼び出し側が渡す（このモジュールは環境変数を読まない） */
+export interface JevOptions {
+  /** TypeSafe の API キー */
+  apiKey: string;
+  /** モデル名。本番では版を固定する（例: 'jev-1.13.0'）。既定は 'jev-latest' */
+  model?: string;
+  /** エンドポイント。既定は TypeSafe の System One API */
+  endpoint?: string;
+  /** fetch の差し替え（テスト・プロキシ用）。既定はグローバルの fetch */
+  fetch?: typeof fetch;
+  /**
+   * 同期の判定が「個人名でない」のとき、Jev の確率がこれ以上なら個人名に覆す。既定 0.8。
+   * 実測（issue #2）では 0.8 で屋号を個人名と誤る例が無かった
+   */
+  acceptAbove?: number;
+  /**
+   * 同期の判定が「個人名」のとき、Jev の確率がこれ未満なら個人名でないに覆す。既定 0.5。
+   * 実測では辞書一致の屋号（地名＋語、業種語＋名など）の大半が 0.5 未満だった
+   */
+  rejectBelow?: number;
+  /**
+   * Jev に問い合わせる同期の規則。これ以外の規則で決まった行は Jev を呼ばない（費用と時間の節約、
+   * および法人語・屋号語尾の除外を Jev に覆させないため）。
+   * 既定: pattern-match / dictionary-match / surname-not-in-dictionary / given-name-not-in-dictionary /
+   *       not-name-shape / not-splittable
+   */
+  consult?: Rule[];
 }
 
 /** 分割結果 */
@@ -66,7 +108,9 @@ export type Rule =
   | 'not-splittable' // 全角スペースで姓と名の2語に分けられない（辞書判定）
   | 'surname-not-in-dictionary' // 姓が辞書に無い
   | 'given-name-not-in-dictionary' // 名が辞書に無い
-  | 'dictionary-match'; // 姓も名も辞書にある（辞書のみの方式、または both で姓名形も辞書も当たった）
+  | 'dictionary-match' // 姓も名も辞書にある（辞書のみの方式、または both で姓名形も辞書も当たった）
+  | 'jev-person' // 同期の判定は個人名でなかったが、Jev の確率が acceptAbove 以上
+  | 'jev-not-person'; // 同期の判定は個人名だったが、Jev の確率が rejectBelow 未満
 
 /** explain() の結果 */
 export interface Explanation {
@@ -74,6 +118,13 @@ export interface Explanation {
   result: boolean;
   /** 結果を決めた規則 */
   rule: Rule;
+  /** Jev に問い合わせたときだけ入る（同期の判定や、問い合わせなかったときは無い） */
+  jev?: {
+    /** 「個人の氏名そのものである」確率（0〜1） */
+    probability: number;
+    /** 実際に使われたモデルの版（例: jev-1.13.0） */
+    model: string;
+  };
 }
 
 /** 判定器 */
@@ -82,6 +133,13 @@ export interface Detector {
   looksLikePersonName(name: string | null | undefined): boolean;
   /** 判定とその理由を返す（デバッグ・監査用） */
   explain(name: string | null | undefined): Explanation;
+  /**
+   * 同期の判定に加えて、jev オプションがあれば迷う行だけ Jev に問い合わせて判定する。
+   * jev オプションが無ければ explain() と同じ結果を返す。
+   */
+  explainAsync(name: string | null | undefined, context?: JevContext): Promise<Explanation>;
+  /** explainAsync().result */
+  looksLikePersonNameAsync(name: string | null | undefined, context?: JevContext): Promise<boolean>;
 }
 
 /** 既定辞書（読み込みは最初に必要になったときの 1 回だけ。以後は使い回す） */
@@ -191,7 +249,100 @@ export function createDetector(options: DetectorOptions = {}): Detector {
     if (!p.result) return p;
     return explainDictionary(name, surnames, givenNames, fold);
   };
-  return { looksLikePersonName: (name) => explain(name).result, explain };
+  const jev = options.jev ? createJevJudge(options.jev) : undefined;
+
+  /**
+   * 同期の判定をし、jev があって規則が consult に含まれるときだけ Jev に問い合わせて覆す。
+   * @param name 判定対象の文字列
+   * @param context 業種・都道府県などの手がかり
+   * @returns 判定結果と規則（Jev を使ったときは jev フィールドつき）
+   */
+  const explainAsync = async (name: string | null | undefined, context: JevContext = {}): Promise<Explanation> => {
+    const sync = explain(name);
+    if (!jev || !jev.consult.has(sync.rule)) return sync;
+    const { probability, model } = await jev.ask((name || '').trim(), context);
+    const info = { probability, model };
+    // 同期が「個人名でない」→ 十分高ければ個人名に。同期が「個人名」→ 十分低ければ個人名でないに
+    if (!sync.result && probability >= jev.acceptAbove) return { result: true, rule: 'jev-person', jev: info };
+    if (sync.result && probability < jev.rejectBelow) return { result: false, rule: 'jev-not-person', jev: info };
+    return { ...sync, jev: info };
+  };
+
+  return {
+    looksLikePersonName: (name) => explain(name).result,
+    explain,
+    explainAsync,
+    looksLikePersonNameAsync: async (name, context) => (await explainAsync(name, context)).result,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Jev（TypeSafe System One API）
+// ----------------------------------------------------------------------------
+
+/** Jev に投げる質問。実測（scripts/eval-jev）と同じ文面にしてある。変えるときは再計測する */
+const JEV_QUESTION = {
+  is_person_name: {
+    type: 'noul',
+    instructions:
+      '施設名は、屋号・店名・法人名・施設名ではなく、個人の氏名（人の姓名）そのものである。姓名の表記は漢字・ひらがな・カタカナ・全角スペース区切り・区切りなしのどれでもよい',
+  },
+};
+
+/** 既定で Jev に問い合わせる同期の規則 */
+const JEV_DEFAULT_CONSULT: Rule[] = [
+  'pattern-match',
+  'dictionary-match',
+  'surname-not-in-dictionary',
+  'given-name-not-in-dictionary',
+  'not-name-shape',
+  'not-splittable',
+];
+
+/**
+ * Jev へ渡す state（文脈）を作る。名前・業種・都道府県だけで、住所などは含めない。
+ * @param name 施設名
+ * @param context 手がかり
+ * @returns state 文字列
+ */
+export function buildJevState(name: string, context: JevContext = {}): string {
+  return `施設名: ${name}\n業種: ${context.businessType || '不明'}\n都道府県: ${context.prefecture || '不明'}`;
+}
+
+/**
+ * Jev に 1 件問い合わせる関数と設定を組み立てる。
+ * @param opts Jev の設定
+ * @returns 問い合わせ関数と、閾値・対象規則
+ */
+function createJevJudge(opts: JevOptions) {
+  if (!opts.apiKey) throw new Error('jev.apiKey が無い');
+  const model = opts.model ?? 'jev-latest';
+  const endpoint = opts.endpoint ?? 'https://api.typesafe.ai/v1/systemone';
+  const fetchImpl = opts.fetch ?? globalThis.fetch;
+  if (typeof fetchImpl !== 'function') throw new Error('fetch が無い（Node 18+ か、jev.fetch を渡す）');
+  const acceptAbove = opts.acceptAbove ?? 0.8;
+  const rejectBelow = opts.rejectBelow ?? 0.5;
+  const consult = new Set<Rule>(opts.consult ?? JEV_DEFAULT_CONSULT);
+
+  /**
+   * 1 件問い合わせる。HTTP エラーや形の違う応答は例外にする（黙って同期の結果に倒すと取りこぼしに気づけない）。
+   * @param name 施設名（trim 済み）
+   * @param context 手がかり
+   * @returns 個人名である確率と、使われたモデル名
+   */
+  const ask = async (name: string, context: JevContext): Promise<{ probability: number; model: string }> => {
+    const res = await fetchImpl(endpoint, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, state: buildJevState(name, context), questions: JEV_QUESTION }),
+    });
+    if (!res.ok) throw new Error(`Jev API ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
+    const json = (await res.json()) as { model?: string; answers?: { is_person_name?: { noul?: number } } };
+    const p = json.answers?.is_person_name?.noul;
+    if (typeof p !== 'number' || Number.isNaN(p)) throw new Error('Jev の応答に is_person_name.noul が無い');
+    return { probability: p, model: String(json.model ?? model) };
+  };
+  return { ask, acceptAbove, rejectBelow, consult };
 }
 
 /** 既定の判定器（既定辞書＋姓名形の both 方式）。最初に使うときに作る */
