@@ -19,6 +19,9 @@ const MUTATIONS = [
   ['both で姓名形を見ない', 'if (!p.result)\n            return p;', 'if (false)\n            return p;'],
   ['splitName が3語を許す', 'parts.length !== 2', 'parts.length < 2'],
   ['辞書照合前の畳み込みを外す', 'fold ? fold(parts.surname) : parts.surname', 'parts.surname'],
+  ['Jev の acceptAbove を含まない比較にする', 'probability >= jev.acceptAbove', 'probability > jev.acceptAbove'],
+  ['Jev の rejectBelow を含む比較にする', 'probability < jev.rejectBelow', 'probability <= jev.rejectBelow'],
+  ['Jev の consult を無視する', '!jev.consult.has(sync.rule)', 'false'],
 ];
 
 let survived = 0;
