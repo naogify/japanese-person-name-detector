@@ -17,7 +17,11 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -30,5 +34,8 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@naogify/japanese-person-name-dictionary": "github:naogify/japanese-person-name-dictionary#c406dc8409c4c806ea3f0a485b1e667c966d26e9"
   }
 }

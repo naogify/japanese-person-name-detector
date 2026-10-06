@@ -14,10 +14,11 @@ const MUTATIONS = [
   ['法人語「大学」を外す', '|大学|', '|'],
   ['屋号語尾「楼」を外す', '座楼]', '座]'],
   ['姓の長さ上限を緩める', '{1,4}', '{1,5}'],
-  ['姓の辞書チェックを外す', 'if (!surnames.has(parts.surname))', 'if (false)'],
-  ['名の辞書チェックを外す', 'if (!givenNames.has(parts.givenName))', 'if (false)'],
+  ['姓の辞書チェックを外す', 'if (!surnames.has(surname))', 'if (false)'],
+  ['名の辞書チェックを外す', 'if (!givenNames.has(givenName))', 'if (false)'],
   ['both で姓名形を見ない', 'if (!p.result)\n            return p;', 'if (false)\n            return p;'],
   ['splitName が3語を許す', 'parts.length !== 2', 'parts.length < 2'],
+  ['辞書照合前の畳み込みを外す', 'fold ? fold(parts.surname) : parts.surname', 'parts.surname'],
 ];
 
 let survived = 0;
