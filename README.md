@@ -66,11 +66,38 @@ detector.explain('山田　太郎'); // { result: false, rule: 'surname-not-in-d
 
 `looksLikePersonName(name, options)` に同じ options を渡してもよい（毎回判定器を作るので、繰り返し使うなら `createDetector` を使う）。
 
+### Jev で迷う行を判定し直す（任意）
+
+[Jev](https://docs.typesafe.ai/introduction/quickstart)（TypeSafe の判定専用モデル。テキストを生成せず確率だけ返す）に、
+同期の判定で迷う行だけを問い合わせる。**`jev` を渡さなければ何も変わらない**（同期の API はそのまま。非同期の API も同期と同じ結果を返す）。
+
+```ts
+const detector = createDetector({
+  jev: {
+    apiKey: process.env.TYPESAFE_API_KEY!, // キーは呼び出し側が渡す（このモジュールは環境変数を読まない）
+    model: 'jev-1.13.0', // 本番では版を固定する（既定は 'jev-latest'）
+    // acceptAbove: 0.8, rejectBelow: 0.5, consult: [...], endpoint, fetch も変えられる
+  },
+});
+await detector.explainAsync('山田太郎', { businessType: '飲食店営業', prefecture: '鹿児島県' });
+// { result: true, rule: 'jev-person', jev: { probability: 0.9, model: 'jev-1.13.0' } }
+await detector.looksLikePersonNameAsync('神楽坂　和茶'); // false（辞書一致でも Jev が屋号と見れば jev-not-person）
+```
+
+- 同期の規則が `consult`（既定: `pattern-match` / `dictionary-match` / `surname-not-in-dictionary` / `given-name-not-in-dictionary` / `not-name-shape` / `not-splittable`）のときだけ問い合わせる。法人語・屋号語尾・空で決まった行は聞かない（費用の節約と、除外規則を覆させないため）
+- 同期が「個人名でない」→ 確率が `acceptAbove`（既定 0.8）以上なら `jev-person`。同期が「個人名」→ 確率が `rejectBelow`（既定 0.5）未満なら `jev-not-person`。中間は同期の結果のまま（`jev` の確率は付く）
+- Jev に渡すのは施設名・業種・都道府県だけ（住所・電話は渡さない）
+- HTTP エラーや形の違う応答は例外にする（黙って同期の結果に倒さない）
+- 実測（食品営業許可データ、`scripts/eval-jev/RESULTS.md`）: 辞書一致の屋号（地名＋語など）の誤除外が約 9% → 約 1% に減る。
+  一方、**出典が氏名を載せると分かっている行（出典リスト内）には使わない**こと。珍しい姓名の約 8% を屋号と誤る
+- 費用は入力トークンのみ（2026-10 時点 0.042 USD / 100 万トークン。1 件約 450 トークン）
+
 ### `explain(name)`
 
 `{ result, rule }` を返す（デバッグ・監査用）。`rule` は
 `empty` / `not-name-shape` / `organization-word` / `shop-suffix` / `pattern-match` /
-`not-splittable` / `surname-not-in-dictionary` / `given-name-not-in-dictionary` / `dictionary-match`。
+`not-splittable` / `surname-not-in-dictionary` / `given-name-not-in-dictionary` / `dictionary-match` /
+`jev-person` / `jev-not-person`（後の 2 つは `explainAsync` で Jev が覆したとき）。
 内部の正規表現そのものは公開しない。
 
 ## 何を判定しないか
@@ -95,6 +122,8 @@ npm install
 npm test          # ビルド後に node --test
 npm run mutation  # 変異注入（規則を 1 つずつ壊してテストが落ちることを確認）
 ```
+
+Jev の検証スクリプトは `scripts/eval-jev/`（README と RESULTS.md を参照。出力の `out/` は氏名を含むので git に入れない）。
 
 `dist/` はコミットしている（GitHub 参照で入れる利用側がビルドなしで使えるように）。
 `src/` を変えたら `npm run build` して `dist/` も一緒にコミットする。
