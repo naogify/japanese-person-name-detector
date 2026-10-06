@@ -125,7 +125,98 @@ export function createDetector(options = {}) {
             return p;
         return explainDictionary(name, surnames, givenNames, fold);
     };
-    return { looksLikePersonName: (name) => explain(name).result, explain };
+    const jev = options.jev ? createJevJudge(options.jev) : undefined;
+    /**
+     * 同期の判定をし、jev があって規則が consult に含まれるときだけ Jev に問い合わせて覆す。
+     * @param name 判定対象の文字列
+     * @param context 業種・都道府県などの手がかり
+     * @returns 判定結果と規則（Jev を使ったときは jev フィールドつき）
+     */
+    const explainAsync = async (name, context = {}) => {
+        const sync = explain(name);
+        if (!jev || !jev.consult.has(sync.rule))
+            return sync;
+        const { probability, model } = await jev.ask((name || '').trim(), context);
+        const info = { probability, model };
+        // 同期が「個人名でない」→ 十分高ければ個人名に。同期が「個人名」→ 十分低ければ個人名でないに
+        if (!sync.result && probability >= jev.acceptAbove)
+            return { result: true, rule: 'jev-person', jev: info };
+        if (sync.result && probability < jev.rejectBelow)
+            return { result: false, rule: 'jev-not-person', jev: info };
+        return { ...sync, jev: info };
+    };
+    return {
+        looksLikePersonName: (name) => explain(name).result,
+        explain,
+        explainAsync,
+        looksLikePersonNameAsync: async (name, context) => (await explainAsync(name, context)).result,
+    };
+}
+// ----------------------------------------------------------------------------
+// Jev（TypeSafe System One API）
+// ----------------------------------------------------------------------------
+/** Jev に投げる質問。実測（scripts/eval-jev）と同じ文面にしてある。変えるときは再計測する */
+const JEV_QUESTION = {
+    is_person_name: {
+        type: 'noul',
+        instructions: '施設名は、屋号・店名・法人名・施設名ではなく、個人の氏名（人の姓名）そのものである。姓名の表記は漢字・ひらがな・カタカナ・全角スペース区切り・区切りなしのどれでもよい',
+    },
+};
+/** 既定で Jev に問い合わせる同期の規則 */
+const JEV_DEFAULT_CONSULT = [
+    'pattern-match',
+    'dictionary-match',
+    'surname-not-in-dictionary',
+    'given-name-not-in-dictionary',
+    'not-name-shape',
+    'not-splittable',
+];
+/**
+ * Jev へ渡す state（文脈）を作る。名前・業種・都道府県だけで、住所などは含めない。
+ * @param name 施設名
+ * @param context 手がかり
+ * @returns state 文字列
+ */
+export function buildJevState(name, context = {}) {
+    return `施設名: ${name}\n業種: ${context.businessType || '不明'}\n都道府県: ${context.prefecture || '不明'}`;
+}
+/**
+ * Jev に 1 件問い合わせる関数と設定を組み立てる。
+ * @param opts Jev の設定
+ * @returns 問い合わせ関数と、閾値・対象規則
+ */
+function createJevJudge(opts) {
+    if (!opts.apiKey)
+        throw new Error('jev.apiKey が無い');
+    const model = opts.model ?? 'jev-latest';
+    const endpoint = opts.endpoint ?? 'https://api.typesafe.ai/v1/systemone';
+    const fetchImpl = opts.fetch ?? globalThis.fetch;
+    if (typeof fetchImpl !== 'function')
+        throw new Error('fetch が無い（Node 18+ か、jev.fetch を渡す）');
+    const acceptAbove = opts.acceptAbove ?? 0.8;
+    const rejectBelow = opts.rejectBelow ?? 0.5;
+    const consult = new Set(opts.consult ?? JEV_DEFAULT_CONSULT);
+    /**
+     * 1 件問い合わせる。HTTP エラーや形の違う応答は例外にする（黙って同期の結果に倒すと取りこぼしに気づけない）。
+     * @param name 施設名（trim 済み）
+     * @param context 手がかり
+     * @returns 個人名である確率と、使われたモデル名
+     */
+    const ask = async (name, context) => {
+        const res = await fetchImpl(endpoint, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model, state: buildJevState(name, context), questions: JEV_QUESTION }),
+        });
+        if (!res.ok)
+            throw new Error(`Jev API ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
+        const json = (await res.json());
+        const p = json.answers?.is_person_name?.noul;
+        if (typeof p !== 'number' || Number.isNaN(p))
+            throw new Error('Jev の応答に is_person_name.noul が無い');
+        return { probability: p, model: String(json.model ?? model) };
+    };
+    return { ask, acceptAbove, rejectBelow, consult };
 }
 /** 既定の判定器（既定辞書＋姓名形の both 方式）。最初に使うときに作る */
 let defaultDetector;
