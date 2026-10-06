@@ -1,14 +1,14 @@
-# @naogify/ja-person-name
+# @naogify/japanese-person-name-detector
 
 文字列が**日本の個人の氏名（姓＋全角スペース＋名）に見えるか**を判定する、依存ゼロの小さなモジュール。
 
 - TypeScript / ESM（`type: module`）、Node 20+、依存ゼロ
-- 現在は private リポジトリ。npm には公開していない
+- npm には公開していない。GitHub の commit SHA を固定して読み込む（`"@naogify/japanese-person-name-detector": "github:naogify/japanese-person-name-detector#<sha>"`）
 
 ## 使い方
 
 ```ts
-import { looksLikePersonName, createDetector, splitName, explain } from '@naogify/ja-person-name';
+import { looksLikePersonName, createDetector, splitName, explain } from '@naogify/japanese-person-name-detector';
 
 looksLikePersonName('山田　太郎'); // true  （姓＋全角スペース＋名）
 looksLikePersonName('株式会社　架空商事'); // false （法人語）

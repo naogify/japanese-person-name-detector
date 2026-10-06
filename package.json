@@ -1,8 +1,12 @@
 {
-  "name": "@naogify/ja-person-name",
+  "name": "@naogify/japanese-person-name-detector",
   "version": "0.1.0",
   "description": "文字列が日本の個人の氏名（姓＋全角スペース＋名）に見えるかを判定する",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/naogify/japanese-person-name-detector.git"
+  },
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
