@@ -49,6 +49,18 @@ export interface DetectorOptions {
    */
   fold?: Fold | null;
   /**
+   * 判定の前に空白を正規化する（前後を trim し、半角・全角スペースの連続を全角スペース 1 個にする）。既定 true。
+   * 「姓 名」（半角）や「姓　　名」（全角 2 個）が姓名形として当たるようになる。false で従来どおり全角 1 個だけを区切りとみなす
+   */
+  normalizeSpaces?: boolean;
+  /**
+   * 空白なしの名前（例: 姓 2 字＋名 2 字の漢字 4 字）を、姓 1〜4 字＋名 1〜6 字のすべての分割で試し、
+   * 姓・名の両方が辞書にある分割があれば個人名とみなす（規則 split-dictionary-match）。既定 false。
+   * 出典が「氏名を載せる」と分かっている行にだけ使うこと。屋号（地名・商品名）が姓＋名に分割できてしまうことがあり、
+   * 実測では屋号 491 件中 6 件が当たった（出典リスト内の屋号 438 件では 1 件）。pattern 方式では使えない（辞書が要る）
+   */
+  splitNoSpace?: boolean;
+  /**
    * Jev（TypeSafe の判定専用モデル）で迷う行を判定し直す。省略時は使わない（同期の判定のみ）。
    * 使うときは explainAsync / looksLikePersonNameAsync を呼ぶ（explain / looksLikePersonName は変わらない）
    */
@@ -109,6 +121,7 @@ export type Rule =
   | 'surname-not-in-dictionary' // 姓が辞書に無い
   | 'given-name-not-in-dictionary' // 名が辞書に無い
   | 'dictionary-match' // 姓も名も辞書にある（辞書のみの方式、または both で姓名形も辞書も当たった）
+  | 'split-dictionary-match' // 空白なしの名前を姓＋名に分割したら両方辞書にあった（splitNoSpace）
   | 'jev-person' // 同期の判定は個人名でなかったが、Jev の確率が acceptAbove 以上
   | 'jev-not-person'; // 同期の判定は個人名だったが、Jev の確率が rejectBelow 未満
 
@@ -153,6 +166,16 @@ function getDefaultDictionary(): { surnames: ReadonlySet<string>; givenNames: Re
   // 7 万語ほどあるので、pattern 方式しか使わない利用者が読み込みコストを払わないよう遅延して読む
   if (!defaultDictionary) defaultDictionary = loadDictionary();
   return defaultDictionary;
+}
+
+/**
+ * 判定前の空白の正規化。前後の空白を取り、半角・全角スペース（タブ等も）の連続を全角スペース 1 個にする。
+ * 食品営業許可データでは「姓 名」（半角）や「姓　　名」（全角 2 個）の氏名が実在し、正規化しないと取りこぼす。
+ * @param name 判定対象の文字列
+ * @returns 正規化後の文字列
+ */
+export function normalizeName(name: string | null | undefined): string {
+  return (name || '').trim().replace(/[\s\u3000]+/gu, SEPARATOR);
 }
 
 /**
@@ -239,14 +262,53 @@ export function createDetector(options: DetectorOptions = {}): Detector {
   // 自前辞書は判定器を作った時点で Set に固める。既定辞書は最初の判定時に読む
   const dictionary = mode !== 'pattern' && hasSurnames ? getDictionary() : undefined;
 
+  const normalizeSpaces = options.normalizeSpaces ?? true;
+  const splitNoSpace = options.splitNoSpace ?? false;
+  if (splitNoSpace && mode === 'pattern') throw new Error('splitNoSpace は辞書が要る（mode=pattern では使えない）');
+
+  /**
+   * 空白なしの名前を姓＋名に分割して辞書を引く。姓 1〜4 字・名 1〜6 字のすべての分割を試す。
+   * both 方式では、分割した形が姓名形の規則（文字種・法人語・屋号語尾）にも当たることを求める。
+   * @param n 正規化済みの名前（区切りを含まない）
+   * @param surnames 姓の辞書
+   * @param givenNames 名の辞書
+   * @returns 当たれば split-dictionary-match、当たらなければ null
+   */
+  const explainSplit = (n: string, surnames: ReadonlySet<string>, givenNames: ReadonlySet<string>): Explanation | null => {
+    const chars = [...n];
+    // 2 字（姓 1＋名 1）は屋号・一般語と見分けがつかないので分割しない
+    if (chars.length < 3) return null;
+    for (let i = 1; i <= Math.min(4, chars.length - 1); i++) {
+      const a = chars.slice(0, i).join('');
+      const b = chars.slice(i).join('');
+      if (chars.length - i > 6) continue;
+      // both では「姓　名」の形が姓名形の規則を通ることも求める（名が屋号語尾なら除外、など）
+      if (mode === 'both' && !explainPattern(`${a}${SEPARATOR}${b}`).result) continue;
+      if (surnames.has(fold ? fold(a) : a) && givenNames.has(fold ? fold(b) : b)) return { result: true, rule: 'split-dictionary-match' };
+    }
+    return null;
+  };
+
   /** 方式に応じた判定とその理由 */
-  const explain = (name: string | null | undefined): Explanation => {
+  const explain = (rawName: string | null | undefined): Explanation => {
+    // 空白を正規化してから判定する（半角スペース・全角 2 個の区切りを全角 1 個に）
+    const name = normalizeSpaces ? normalizeName(rawName) : rawName;
     if (mode === 'pattern') return explainPattern(name);
     const { surnames, givenNames } = dictionary ?? getDictionary();
-    if (mode === 'dictionary') return explainDictionary(name, surnames, givenNames, fold);
+    const trimmed = (name || '').trim();
+    // 空白なしの名前は（オプションがあれば）分割して辞書を引く
+    const noSeparator = trimmed !== '' && !trimmed.includes(SEPARATOR);
+    if (mode === 'dictionary') {
+      const d = explainDictionary(name, surnames, givenNames, fold);
+      if (!d.result && splitNoSpace && noSeparator) return explainSplit(trimmed, surnames, givenNames) ?? d;
+      return d;
+    }
     // both: 姓名形（除外規則込み）に当たり、かつ姓・名が辞書にある
     const p = explainPattern(name);
-    if (!p.result) return p;
+    if (!p.result) {
+      if (splitNoSpace && noSeparator && p.rule === 'not-name-shape') return explainSplit(trimmed, surnames, givenNames) ?? p;
+      return p;
+    }
     return explainDictionary(name, surnames, givenNames, fold);
   };
   const jev = options.jev ? createJevJudge(options.jev) : undefined;
@@ -293,6 +355,7 @@ const JEV_QUESTION = {
 const JEV_DEFAULT_CONSULT: Rule[] = [
   'pattern-match',
   'dictionary-match',
+  'split-dictionary-match',
   'surname-not-in-dictionary',
   'given-name-not-in-dictionary',
   'not-name-shape',
