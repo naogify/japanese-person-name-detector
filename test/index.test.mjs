@@ -2,7 +2,7 @@
 //   npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { looksLikePersonName, createDetector, splitName, explain } from '../dist/index.js';
+import { looksLikePersonName, createDetector, splitName, explain, normalizeName } from '../dist/index.js';
 
 // 姓名形（正規表現）だけを見る判定器。辞書に無い架空の姓でも形が合えば true
 const pattern = createDetector({ mode: 'pattern' });
@@ -44,7 +44,7 @@ test('既定: 空・形の合わないものは個人名と判定しない', () 
   assert.deepEqual(explain('架空商店'), { result: false, rule: 'not-name-shape' });
   assert.equal(looksLikePersonName(undefined), false);
   assert.equal(looksLikePersonName(null), false);
-  assert.equal(looksLikePersonName('山田 太郎'), false); // 半角スペースは対象外
+  assert.equal(looksLikePersonName('山田 太郎'), true); // 半角スペースも区切りとして正規化する（normalizeSpaces 既定 true）
 });
 
 test('既定: createDetector() は引数なしでも既定辞書の both 方式になる', () => {
@@ -76,7 +76,7 @@ test('pattern: 屋号・法人・単語名は個人名と判定しない（誤�
   assert.equal(pattern.looksLikePersonName('架空　食堂'), false); // 名側が屋号の末尾語
   assert.equal(pattern.looksLikePersonName('鮨　見本屋'), false);
   assert.equal(pattern.looksLikePersonName('架空商店'), false); // 全角スペース無し
-  assert.equal(pattern.looksLikePersonName('山田 太郎'), false); // 半角スペースは対象外
+  assert.equal(pattern.looksLikePersonName('山田 太郎'), true); // 半角スペースも区切りとして正規化する
   assert.equal(pattern.looksLikePersonName('山田　太郎　商店'), false); // 3語
   assert.equal(pattern.looksLikePersonName('Ｐｕｂｌｉｃ　Ｓｑｕａｒｅ'), false); // 英字
   assert.equal(pattern.looksLikePersonName('ＡＢ　ＣＤ'), false);
@@ -194,4 +194,70 @@ test('自前辞書: 既定では入力を畳み込んでから引く。fold: nul
 test('looksLikePersonName(name, options): オプション付きは createDetector と同じ', () => {
   assert.equal(looksLikePersonName('試験　太郎', { surnames: SURNAMES, givenNames: GIVEN }), true);
   assert.equal(looksLikePersonName('山田　太郎', { surnames: SURNAMES, givenNames: GIVEN }), false);
+});
+
+// ----------------------------------------------------------------------------
+// 空白の正規化と、空白なしの分割辞書照合（issue #4）
+// ----------------------------------------------------------------------------
+
+test('normalizeName: 前後の空白を取り、半角・全角スペースの連続を全角 1 個にする', () => {
+  assert.equal(normalizeName(' 山田 太郎 '), '山田　太郎');
+  assert.equal(normalizeName('山田　　太郎'), '山田　太郎');
+  assert.equal(normalizeName('山田 　太郎'), '山田　太郎');
+  assert.equal(normalizeName('山田\t太郎'), '山田　太郎');
+  assert.equal(normalizeName('山田太郎'), '山田太郎');
+  assert.equal(normalizeName(''), '');
+  assert.equal(normalizeName(null), '');
+});
+
+test('normalizeSpaces: 既定で半角スペース・全角 2 個の区切りも姓名形として当たる', () => {
+  assert.deepEqual(explain('山田 太郎'), { result: true, rule: 'dictionary-match' });
+  assert.deepEqual(explain('山田　　太郎'), { result: true, rule: 'dictionary-match' });
+  assert.deepEqual(explain('山田  太郎'), { result: true, rule: 'dictionary-match' }); // 半角 2 個
+  assert.equal(pattern.looksLikePersonName('試験　　さくら'), true);
+  // 3 語は正規化しても 3 語のまま（区切り 2 個）
+  assert.equal(pattern.looksLikePersonName('山田 太郎 商店'), false);
+  // splitName は正規化しない（純粋な分割関数のまま）
+  assert.equal(splitName('山田 太郎'), null);
+});
+
+test('normalizeSpaces: false なら従来どおり全角スペース 1 個だけを区切りとみなす', () => {
+  const d = createDetector({ mode: 'pattern', normalizeSpaces: false });
+  assert.equal(d.looksLikePersonName('山田 太郎'), false);
+  assert.equal(d.looksLikePersonName('山田　　太郎'), false);
+  assert.equal(d.looksLikePersonName('山田　太郎'), true);
+  const b = createDetector({ normalizeSpaces: false });
+  assert.deepEqual(b.explain('山田 太郎'), { result: false, rule: 'not-name-shape' });
+});
+
+test('splitNoSpace: 空白なしの名前を姓＋名に分割し、両方辞書にあれば split-dictionary-match', () => {
+  const d = createDetector({ surnames: ['試験', '架空', '長屋'], givenNames: ['太郎', 'さくら', '花子'], splitNoSpace: true });
+  assert.deepEqual(d.explain('試験太郎'), { result: true, rule: 'split-dictionary-match' });
+  assert.deepEqual(d.explain('架空さくら'), { result: true, rule: 'split-dictionary-match' }); // 名がかな
+  assert.deepEqual(d.explain('長屋花子'), { result: true, rule: 'split-dictionary-match' }); // 姓に屋号語（屋）を含んでも姓側は見ない
+  // 分割しても辞書に無ければ従来の規則のまま
+  assert.deepEqual(d.explain('試験次郎'), { result: false, rule: 'not-name-shape' });
+  assert.deepEqual(d.explain('無名太郎'), { result: false, rule: 'not-name-shape' });
+  // 区切りがあれば分割照合は使わず通常の判定
+  assert.deepEqual(d.explain('試験　太郎'), { result: true, rule: 'dictionary-match' });
+  assert.deepEqual(d.explain('無名　太郎'), { result: false, rule: 'surname-not-in-dictionary' });
+  // 既定は off
+  assert.deepEqual(createDetector({ surnames: ['試験'], givenNames: ['太郎'] }).explain('試験太郎'), { result: false, rule: 'not-name-shape' });
+});
+
+test('splitNoSpace: 分割した形にも姓名形の規則（屋号語尾・法人語・長さ）が効き、2 字は分割しない', () => {
+  const d = createDetector({ surnames: ['試験', '山'], givenNames: ['太店', '太郎', '田', '大学'], splitNoSpace: true });
+  assert.deepEqual(d.explain('試験太店'), { result: false, rule: 'not-name-shape' }); // 名が屋号語尾
+  assert.deepEqual(d.explain('試験大学'), { result: false, rule: 'not-name-shape' }); // 法人語
+  assert.deepEqual(d.explain('山田'), { result: false, rule: 'not-name-shape' }); // 2 字（姓 1＋名 1）は分割しない
+  assert.deepEqual(d.explain('山太郎'), { result: true, rule: 'split-dictionary-match' }); // 3 字から
+  assert.deepEqual(d.explain('試験あいうえおかき'), { result: false, rule: 'not-name-shape' }); // 名 7 字以上
+  // 異体字は畳み込んでから辞書を引く
+  const f = createDetector({ surnames: ['高橋'], givenNames: ['太郎'], splitNoSpace: true });
+  assert.deepEqual(f.explain('髙橋太郎'), { result: true, rule: 'split-dictionary-match' });
+  // mode=dictionary でも使える（姓名形の規則は見ない）
+  const m = createDetector({ surnames: ['試験'], givenNames: ['太店'], splitNoSpace: true, mode: 'dictionary' });
+  assert.deepEqual(m.explain('試験太店'), { result: true, rule: 'split-dictionary-match' });
+  // pattern 方式では使えない（辞書が要る）
+  assert.throws(() => createDetector({ mode: 'pattern', splitNoSpace: true }));
 });

@@ -16,12 +16,15 @@ const MUTATIONS = [
   ['姓の長さ上限を緩める', '{1,4}', '{1,5}'],
   ['姓の辞書チェックを外す', 'if (!surnames.has(surname))', 'if (false)'],
   ['名の辞書チェックを外す', 'if (!givenNames.has(givenName))', 'if (false)'],
-  ['both で姓名形を見ない', 'if (!p.result)\n            return p;', 'if (false)\n            return p;'],
+  ['both で姓名形を見ない', 'if (!p.result) {', 'if (false) {'],
   ['splitName が3語を許す', 'parts.length !== 2', 'parts.length < 2'],
   ['辞書照合前の畳み込みを外す', 'fold ? fold(parts.surname) : parts.surname', 'parts.surname'],
   ['Jev の acceptAbove を含まない比較にする', 'probability >= jev.acceptAbove', 'probability > jev.acceptAbove'],
   ['Jev の rejectBelow を含む比較にする', 'probability < jev.rejectBelow', 'probability <= jev.rejectBelow'],
   ['Jev の consult を無視する', '!jev.consult.has(sync.rule)', 'false'],
+  ['空白の正規化を外す', 'normalizeSpaces ? normalizeName(rawName) : rawName', 'rawName'],
+  ['分割照合で 2 字も分割する', 'if (chars.length < 3)\n            return null;', 'if (false)\n            return null;'],
+  ['分割照合で姓名形の規則を見ない', "mode === 'both' && !explainPattern(`${a}${SEPARATOR}${b}`).result", 'false'],
 ];
 
 let survived = 0;

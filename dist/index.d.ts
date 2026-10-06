@@ -17,6 +17,18 @@ export interface DetectorOptions {
      */
     fold?: Fold | null;
     /**
+     * 判定の前に空白を正規化する（前後を trim し、半角・全角スペースの連続を全角スペース 1 個にする）。既定 true。
+     * 「姓 名」（半角）や「姓　　名」（全角 2 個）が姓名形として当たるようになる。false で従来どおり全角 1 個だけを区切りとみなす
+     */
+    normalizeSpaces?: boolean;
+    /**
+     * 空白なしの名前（例: 姓 2 字＋名 2 字の漢字 4 字）を、姓 1〜4 字＋名 1〜6 字のすべての分割で試し、
+     * 姓・名の両方が辞書にある分割があれば個人名とみなす（規則 split-dictionary-match）。既定 false。
+     * 出典が「氏名を載せる」と分かっている行にだけ使うこと。屋号（地名・商品名）が姓＋名に分割できてしまうことがあり、
+     * 実測では屋号 491 件中 6 件が当たった（出典リスト内の屋号 438 件では 1 件）。pattern 方式では使えない（辞書が要る）
+     */
+    splitNoSpace?: boolean;
+    /**
      * Jev（TypeSafe の判定専用モデル）で迷う行を判定し直す。省略時は使わない（同期の判定のみ）。
      * 使うときは explainAsync / looksLikePersonNameAsync を呼ぶ（explain / looksLikePersonName は変わらない）
      */
@@ -63,7 +75,7 @@ export interface SplitName {
     givenName: string;
 }
 /** どの規則で判定が決まったか */
-export type Rule = 'empty' | 'not-name-shape' | 'organization-word' | 'shop-suffix' | 'pattern-match' | 'not-splittable' | 'surname-not-in-dictionary' | 'given-name-not-in-dictionary' | 'dictionary-match' | 'jev-person' | 'jev-not-person';
+export type Rule = 'empty' | 'not-name-shape' | 'organization-word' | 'shop-suffix' | 'pattern-match' | 'not-splittable' | 'surname-not-in-dictionary' | 'given-name-not-in-dictionary' | 'dictionary-match' | 'split-dictionary-match' | 'jev-person' | 'jev-not-person';
 /** explain() の結果 */
 export interface Explanation {
     /** 判定結果（looksLikePersonName と同じ） */
@@ -92,6 +104,13 @@ export interface Detector {
     /** explainAsync().result */
     looksLikePersonNameAsync(name: string | null | undefined, context?: JevContext): Promise<boolean>;
 }
+/**
+ * 判定前の空白の正規化。前後の空白を取り、半角・全角スペース（タブ等も）の連続を全角スペース 1 個にする。
+ * 食品営業許可データでは「姓 名」（半角）や「姓　　名」（全角 2 個）の氏名が実在し、正規化しないと取りこぼす。
+ * @param name 判定対象の文字列
+ * @returns 正規化後の文字列
+ */
+export declare function normalizeName(name: string | null | undefined): string;
 /**
  * 全角スペース1個で「姓」と「名」に分ける。分けられなければ null。
  * 前後の空白は取り除いてから分ける。辞書判定やマスク用途に使う。
