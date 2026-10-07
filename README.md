@@ -1,10 +1,16 @@
 # @naogify/japanese-person-name-detector
 
-文字列が**日本の個人の氏名（姓＋全角スペース＋名）に見えるか**を判定する小さなモジュール。
+文字列が**日本の個人の氏名に見えるか**を判定する小さなモジュール。
+姓名形の規則（正規表現）・姓名辞書・任意で [Jev](https://docs.typesafe.ai/introduction/quickstart)（判定専用モデル）を組み合わせる。
 
 - TypeScript / ESM（`type: module`）、Node 20+
-- 姓・名の辞書は既定で [japanese-person-name-dictionary](https://github.com/naogify/japanese-person-name-dictionary) を使う（依存として同梱。差し替え可）
-- npm には公開していない。GitHub の commit SHA を固定して読み込む（`"@naogify/japanese-person-name-detector": "github:naogify/japanese-person-name-detector#<sha>"`）
+- 姓・名の辞書は既定で [@naogify/japanese-person-name-dictionary](https://github.com/naogify/japanese-person-name-dictionary) を使う（依存として入る。差し替え可）
+
+## インストール
+
+```bash
+npm install @naogify/japanese-person-name-detector
+```
 
 ## 使い方
 
@@ -145,8 +151,18 @@ Jev の検証スクリプトは `scripts/eval-jev/`（README と RESULTS.md を�
 `src/` を変えたら `npm run build` して `dist/` も一緒にコミットする。
 テストの氏名は架空の定型例のみ。実在の個人名は書かない。
 
-既定辞書の版を上げるときは `package.json` の
-`@naogify/japanese-person-name-dictionary` の commit SHA を更新して `npm install` する。
+既定辞書の版を上げるときは `npm install @naogify/japanese-person-name-dictionary@<版>` する。
+
+## 公開手順（npm）
+
+1. 辞書 `@naogify/japanese-person-name-dictionary` が npm に公開されていること。
+   `dependencies` が GitHub 参照のままだと `prepublishOnly`（`scripts/check-publish.mjs`）が公開を止める
+2. `package.json` の `version` を上げてコミットし、main にマージする
+3. GitHub で `v<version>` のタグの Release を作って公開する。`.github/workflows/publish.yml` がテストしてから npm に公開する（provenance つき）
+
+初回だけは npm 上にパッケージが無く Trusted Publishing を登録できないので、
+`npm login` してから手元で `npm publish` するか、リポジトリの Secrets に `NPM_TOKEN` を入れてから Release を作る。
+公開後、npmjs.com のパッケージ設定で Trusted Publisher（このリポジトリ・`publish.yml`）を登録し、`NPM_TOKEN` は消してよい。
 
 ## ライセンス
 
