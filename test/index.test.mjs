@@ -261,3 +261,17 @@ test('splitNoSpace: 分割した形にも姓名形の規則（屋号語尾・法
   // pattern 方式では使えない（辞書が要る）
   assert.throws(() => createDetector({ mode: 'pattern', splitNoSpace: true }));
 });
+
+// ----------------------------------------------------------------------------
+// 公開前の確認（scripts/check-publish.mjs）
+// ----------------------------------------------------------------------------
+
+test('check-publish: GitHub・git・URL・ファイル参照の依存を見分ける', async () => {
+  const { isNonRegistrySpec } = await import('../scripts/check-publish.mjs');
+  for (const spec of ['github:naogify/x#abc', 'git+https://github.com/a/b.git', 'git://x', 'https://x/y.tgz', 'file:../x', 'link:../x', 'naogify/x', 'naogify/x#abc']) {
+    assert.equal(isNonRegistrySpec(spec), true, spec);
+  }
+  for (const spec of ['^0.1.0', '0.1.0', '~1.2.3', '>=1 <2', 'latest', '*']) {
+    assert.equal(isNonRegistrySpec(spec), false, spec);
+  }
+});

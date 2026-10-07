@@ -1,0 +1,56 @@
+# ============================================================================
+# npm への公開
+# ----------------------------------------------------------------------------
+# GitHub の Release を公開（published）すると、テストしてから npm に公開する。
+# - Release のタグ（v0.1.0 など）と package.json の version が一致しないときは公開しない
+# - 認証は npm の Trusted Publishing（OIDC）を使う。npmjs.com のパッケージ設定で
+#   このリポジトリ・このワークフロー（publish.yml）を Trusted Publisher に登録しておくこと。
+#   登録前（初回）は secrets.NPM_TOKEN があればそれを使う（無ければ公開に失敗する）
+# - provenance（来歴の証明）つきで公開する（package.json の publishConfig）
+# ============================================================================
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # Trusted Publishing と provenance に必要
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # Trusted Publishing には npm 11.5.1 以上が要るため Node 24 を使う
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # タグと package.json の version の一致を確かめる（v を除いて比べる）
+      - name: タグと version の一致を確認
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "タグ $GITHUB_REF_NAME と package.json の version $VERSION が一致しない"
+            exit 1
+          fi
+
+      # 依存（辞書）を入れる。package-lock.json の版で固定
+      - name: 依存を入れる
+        run: npm ci
+
+      # テストのほか、prepublishOnly が依存のレジストリ参照（GitHub 参照でないこと）と dist の鮮度を確かめる
+      - name: テスト
+        run: npm test
+
+      - name: 公開
+        run: npm publish
+        env:
+          # Trusted Publishing を登録済みなら使われない（OIDC が優先される）
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
