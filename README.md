@@ -152,3 +152,10 @@ Jev の検証スクリプトは `scripts/eval-jev/`（README と RESULTS.md を�
 
 コードは MIT。既定辞書のデータは [japanese-person-name-dictionary](https://github.com/naogify/japanese-person-name-dictionary) の各出典の条件に従う
 （再配布するときは同リポジトリの `LICENSES/` を同梱する）。
+
+## 第三者の辞書データの出典と表示
+
+このリポジトリのコードは MIT。**辞書データは含まず**、既定辞書は依存の `japanese-person-name-dictionary` から読み込む。
+その辞書は Mozc（Google）・SudachiDict（Works Applications。NEologd・UniDic を含む）・UniDic small・mecab-ipadic（NAIST・ICOT）・Wikidata の姓・名を含み、各出典の条件に従う。
+出典・版・ライセンス・守る義務は [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)、ライセンス全文は `LICENSES/`（原文のまま）。
+**Google・NAIST・Works Applications・UniDic Consortium／国立国語研究所の名前を宣伝・販促に使わない。** 条件は公開文書から読み取ったもので、法務の最終確認は別途。

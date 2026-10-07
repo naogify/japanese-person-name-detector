@@ -19,6 +19,8 @@
   },
   "files": [
     "dist",
+    "LICENSES",
+    "THIRD_PARTY_NOTICES.md",
     "README.md",
     "LICENSE"
   ],
@@ -36,6 +38,6 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
-    "@naogify/japanese-person-name-dictionary": "github:naogify/japanese-person-name-dictionary#c406dc8409c4c806ea3f0a485b1e667c966d26e9"
+    "@naogify/japanese-person-name-dictionary": "github:naogify/japanese-person-name-dictionary#ca1d61ef5f7dd672d49eb7e3ccb804cd38b67b0d"
   }
 }
