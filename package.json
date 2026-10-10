@@ -54,7 +54,7 @@
     "prepublishOnly": "npm test && node scripts/check-publish.mjs"
   },
   "dependencies": {
-    "@naogify/japanese-person-name-dictionary": "github:naogify/japanese-person-name-dictionary#ca1d61ef5f7dd672d49eb7e3ccb804cd38b67b0d"
+    "@naogify/japanese-person-name-dictionary": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
