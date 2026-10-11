@@ -1,8 +1,9 @@
 # ============================================================================
 # npm への公開
 # ----------------------------------------------------------------------------
-# GitHub の Release を公開（published）すると、テストしてから npm に公開する。
-# - Release のタグ（v0.1.0 など）と package.json の version が一致しないときは公開しない
+# v で始まるタグ（v0.1.0 など）を push すると、テストしてから npm に公開する。
+# - タグと package.json の version が一致しないときは公開しない
+# - タグの付いたコミットが main に含まれないときは公開しない（ブランチ上の版を誤って出さない）
 # - 認証は npm の Trusted Publishing（OIDC）を使う。npmjs.com のパッケージ設定で
 #   このリポジトリ・このワークフロー（publish.yml）を Trusted Publisher に登録しておくこと。
 #   登録前（初回）は secrets.NPM_TOKEN があればそれを使う（無ければ公開に失敗する）
@@ -11,8 +12,9 @@
 name: Publish to npm
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
@@ -23,7 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # main との包含関係を調べるため履歴をすべて取る
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Trusted Publishing には npm 11.5.1 以上が要るため Node 24 を使う
       - uses: actions/setup-node@v4
@@ -38,6 +43,14 @@ jobs:
           VERSION="$(node -p "require('./package.json').version")"
           if [ "$TAG" != "$VERSION" ]; then
             echo "タグ $GITHUB_REF_NAME と package.json の version $VERSION が一致しない"
+            exit 1
+          fi
+
+      # タグの付いたコミットが main に含まれることを確かめる
+      - name: main に含まれることを確認
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "タグ $GITHUB_REF_NAME のコミットが main に含まれない"
             exit 1
           fi
 
